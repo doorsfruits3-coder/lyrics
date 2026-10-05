@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discord Lyric Status Sync - Đồng Bộ Lời Nhạc Lên Discord</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- HEADER -->
+        <header class="navbar">
+            <div class="brand">
+                <div class="logo-icon">🎵</div>
+                <div class="brand-text">
+                    <h1>Discord Lyric Status</h1>
+                    <span class="badge-version">v2.0 Pro • Đồng Bộ Theo Thời Gian Thực</span>
+                </div>
+            </div>
+            <div class="nav-status">
+                <div id="connectionPill" class="status-pill offline">
+                    <span class="status-dot"></span>
+                    <span id="connectionText">Chưa kết nối Discord</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- MAIN GRID -->
+        <div class="main-grid">
+            <!-- LEFT COLUMN: CONTROLS & AUTH & LYRICS INPUT -->
+            <div class="left-col">
+                <!-- CARD 1: DISCORD AUTHENTICATION -->
+                <div class="card auth-card">
+                    <div class="card-header">
+                        <div class="header-icon">🔑</div>
+                        <div>
+                            <h2>1. Đăng Nhập Tài Khoản Discord</h2>
+                            <p class="subtitle">Đăng nhập bằng Cookie hoặc Token Discord cá nhân</p>
+                        </div>
+                    </div>
+                    
+                    <div class="auth-input-group">
+                        <div class="input-wrapper">
+                            <input type="password" id="authInput" placeholder="Dán Token hoặc Cookie Discord vào đây..." autocomplete="off">
+                            <button type="button" class="btn-eye" id="togglePasswordBtn" title="Hiện/Ẩn">👁️</button>
+                        </div>
+                        <div class="auth-actions">
+                            <button id="verifyBtn" class="btn btn-primary">
+                                <span class="btn-icon">⚡</span> Xác Thực Tài Khoản
+                            </button>
+                            <button id="testStatusBtn" class="btn btn-secondary" disabled>
+                                🧪 Test Status
+                            </button>
+                            <button id="clearStatusBtn" class="btn btn-danger" disabled>
+                                🗑️ Xóa Status
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- USER INFO PROFILE BANNER -->
+                    <div id="userProfile" class="user-profile-banner hidden">
+                        <img id="userAvatar" src="" alt="Avatar" class="user-avatar">
+                        <div class="user-meta">
+                            <div class="user-names">
+                                <span id="userGlobalName" class="user-display-name">---</span>
+                                <span id="userHandle" class="user-handle">@---</span>
+                            </div>
+                            <div class="user-id-tag">ID: <span id="userId">---</span></div>
+                        </div>
+                        <div class="auth-status-badge">Đã kết nối ✅</div>
+                    </div>
+
+                    <!-- ACCORDION: INSTRUCTIONS TO GET TOKEN / COOKIE -->
+                    <details class="help-accordion">
+                        <summary>💡 Hướng dẫn lấy Token / Cookie siêu tốc trong 5 giây</summary>
+                        <div class="help-content">
+                            <p><strong>Cách 1: Lấy Token cực nhanh qua F12 Console (Khuyên dùng)</strong></p>
+                            <ol>
+                                <li>Mở Discord trên trình duyệt web (hoặc ứng dụng Discord trên máy tính).</li>
+                                <li>Nhấn phím <kbd>F12</kbd> (hoặc <kbd>Ctrl + Shift + I</kbd>) để mở Developer Tools.</li>
+                                <li>Chọn tab <strong>Console</strong>, dán đoạn mã sau và nhấn <strong>Enter</strong>:</li>
+                            </ol>
+                            <div class="code-snippet-box">
+                                <code id="tokenSnippet">(webpackChunkdiscord_app.push([[''],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken()</code>
+                                <button class="btn-copy" id="copySnippetBtn" title="Copy code">📋 Copy</button>
+                            </div>
+                            <p class="snippet-note">➡️ Dòng chữ trả về trong ngoặc kép chính là Token của bạn. Copy và dán vào ô trên!</p>
+
+                            <p style="margin-top: 12px;"><strong>Cách 2: Lấy từ Cookie / Network</strong></p>
+                            <p>Trong F12, mở tab <strong>Network</strong>, tải lại trang Discord, tìm request có tên <code>messages</code> hoặc <code>@me</code>, tìm phần <strong>Request Headers</strong> và copy giá trị của dòng <code>Authorization: ...</code> hoặc toàn bộ header.</p>
+                        </div>
+                    </details>
+                </div>
+
+                <!-- CARD 2: LYRICS INPUT (LINK / FILE / SAMPLE) -->
+                <div class="card lyrics-source-card">
+                    <div class="card-header">
+                        <div class="header-icon">🎶</div>
+                        <div>
+                            <h2>2. Chọn Nguồn Lời Bài Hát</h2>
+                            <p class="subtitle">Quét tự động qua link hoặc tải lên file lời bài hát (.lrc, .srt)</p>
+                        </div>
+                    </div>
+
+                    <!-- TABS -->
+                    <div class="tabs-nav">
+                        <button class="tab-btn active" data-tab="tab-link">🔗 Quét Link / Tìm Kiếm</button>
+                        <button class="tab-btn" data-tab="tab-file">📁 Tải File Lời (.LRC / .SRT)</button>
+                        <button class="tab-btn" data-tab="tab-samples">✨ Bài Hát Mẫu</button>
+                    </div>
+
+                    <!-- TAB CONTENT 1: LINK / SEARCH -->
+                    <div id="tab-link" class="tab-pane active">
+                        <div class="search-box">
+                            <input type="text" id="songUrlInput" placeholder="Dán link YouTube, Spotify, ZingMP3 hoặc gõ tên bài hát...">
+                            <button id="fetchUrlBtn" class="btn btn-accent">
+                                <span class="btn-icon">🔍</span> Quét Lời Nhạc
+                            </button>
+                        </div>
+                        <div class="supported-services">
+                            <span>Hỗ trợ:</span>
+                            <span class="tag">🔴 YouTube Video / MV</span>
+                            <span class="tag">🟢 Spotify Track</span>
+                            <span class="tag">🟣 ZingMP3</span>
+                            <span class="tag">🌐 LRCLIB Synced Database</span>
+                        </div>
+                    </div>
+
+                    <!-- TAB CONTENT 2: FILE UPLOAD -->
+                    <div id="tab-file" class="tab-pane">
+                        <div class="drop-zone" id="dropZone">
+                            <div class="drop-icon">📤</div>
+                            <p class="drop-text">Kéo thả tệp <strong>.lrc</strong>, <strong>.srt</strong>, <strong>.vtt</strong> hoặc <strong>.txt</strong> vào đây</p>
+                            <span class="drop-sub">hoặc nhấn để duyệt file từ máy tính</span>
+                            <input type="file" id="fileInput" accept=".lrc,.srt,.vtt,.txt" style="display: none;">
+                        </div>
+                    </div>
+
+                    <!-- TAB CONTENT 3: SAMPLES -->
+                    <div id="tab-samples" class="tab-pane">
+                        <p class="sample-intro">Dùng thử ngay với các bài hát mẫu đã được căn chỉnh lời chuẩn từng giây:</p>
+                        <div class="sample-cards-grid">
+                            <div class="sample-item" data-sample="see_tinh">
+                                <div class="sample-icon">💖</div>
+                                <div class="sample-info">
+                                    <strong>See Tình</strong>
+                                    <span>Hoàng Thùy Linh</span>
+                                </div>
+                                <button class="btn btn-sm btn-outline load-sample-btn" data-sample="see_tinh">Dùng bài này</button>
+                            </div>
+                            <div class="sample-item" data-sample="noi_nay_co_anh">
+                                <div class="sample-icon">❄️</div>
+                                <div class="sample-info">
+                                    <strong>Nơi Này Có Anh</strong>
+                                    <span>Sơn Tùng M-TP</span>
+                                </div>
+                                <button class="btn btn-sm btn-outline load-sample-btn" data-sample="noi_nay_co_anh">Dùng bài này</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CARD 3: SYNC SETTINGS & OPTIONS -->
+                <div class="card settings-card">
+                    <div class="card-header">
+                        <div class="header-icon">⚙️</div>
+                        <div>
+                            <h2>3. Cấu Hình Hiển Thị & Tùy Chỉnh</h2>
+                            <p class="subtitle">Định dạng câu từ, emoji và chế độ cập nhật</p>
+                        </div>
+                    </div>
+
+                    <div class="settings-grid">
+                        <div class="form-group">
+                            <label for="emojiInput">Emoji đi kèm:</label>
+                            <input type="text" id="emojiInput" value="🎵" class="input-sm" maxlength="10">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="formatInput">Định dạng hiển thị:</label>
+                            <select id="formatSelect" class="input-select">
+                                <option value="{emoji} {lyric}">[Emoji] [Lời bài hát] (Khuyên dùng)</option>
+                                <option value="{lyric}">Chỉ [Lời bài hát]</option>
+                                <option value="🎧 {lyric}">🎧 [Lời bài hát]</option>
+                                <option value="✨ {lyric} ✨">✨ [Lời bài hát] ✨</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="targetSelect">Vị trí cập nhật trên Discord:</label>
+                            <select id="targetSelect" class="input-select">
+                                <option value="custom_status">Trạng thái tùy chỉnh (Custom Status)</option>
+                                <option value="bio">Tiểu sử cá nhân (About Me / Bio)</option>
+                                <option value="both">Cả hai (Status + Bio)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group checkbox-group">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="clearOnFinishCheck" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <span class="toggle-label">Tự động xóa trạng thái khi hết bài</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT COLUMN: KARAOKE VIEWER, SYNC PLAYER & DISCORD PREVIEW -->
+            <div class="right-col">
+                <!-- CARD: SYNC CONTROLLER & TIMELINE -->
+                <div class="card player-card">
+                    <div class="card-header player-header">
+                        <div class="current-track-info">
+                            <span class="track-badge">Đang chuẩn bị</span>
+                            <h2 id="currentTrackTitle">Chưa có bài hát nào</h2>
+                            <p id="currentTrackArtist" class="subtitle">Hãy dán link hoặc chọn file lời hát ở cột bên trái</p>
+                        </div>
+                        <div class="player-timer">
+                            <span id="currentTimeDisplay" class="timer-digits">00:00</span>
+                            <span class="timer-slash">/</span>
+                            <span id="totalTimeDisplay" class="timer-total">00:00</span>
+                        </div>
+                    </div>
+
+                    <!-- PROGRESS BAR -->
+                    <div class="timeline-container">
+                        <input type="range" id="timelineSlider" min="0" max="100" value="0" step="0.1" class="timeline-slider">
+                    </div>
+
+                    <!-- SYNC CONTROLLER BUTTONS -->
+                    <div class="controller-bar">
+                        <div class="playback-controls">
+                            <button id="btnPlay" class="btn btn-success btn-lg" disabled>
+                                <span class="btn-icon">▶</span> Bắt Đầu Đồng Bộ
+                            </button>
+                            <button id="btnPause" class="btn btn-warning btn-lg" style="display: none;">
+                                <span class="btn-icon">⏸</span> Tạm Dừng
+                            </button>
+                            <button id="btnStop" class="btn btn-danger btn-lg" disabled>
+                                <span class="btn-icon">⏹</span> Dừng Lại
+                            </button>
+                        </div>
+
+                        <!-- OFFSET CALIBRATOR (TIMING SYNC) -->
+                        <div class="offset-controls">
+                            <span class="offset-label" title="Cân chỉnh độ trễ nếu nhạc phát nhanh/chậm hơn status">
+                                Cân chỉnh nhịp: <strong id="offsetValue">0.00s</strong>
+                            </span>
+                            <div class="offset-btn-group">
+                                <button class="btn-offset" data-delta="-1.0" title="Chậm 1s">-1s</button>
+                                <button class="btn-offset" data-delta="-0.2" title="Chậm 0.2s">-0.2s</button>
+                                <button class="btn-offset" data-delta="0" title="Đặt lại 0s">0s</button>
+                                <button class="btn-offset" data-delta="0.2" title="Nhanh 0.2s">+0.2s</button>
+                                <button class="btn-offset" data-delta="1.0" title="Nhanh 1s">+1s</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DISCORD LIVE STATUS PREVIEW -->
+                    <div class="discord-preview-box">
+                        <div class="preview-title">Xem trước hồ sơ Discord của bạn trực tiếp:</div>
+                        <div class="discord-profile-mockup">
+                            <div class="mockup-banner"></div>
+                            <div class="mockup-avatar-wrapper">
+                                <img id="previewAvatar" src="https://cdn.discordapp.com/embed/avatars/0.png" class="mockup-avatar">
+                                <div class="mockup-online-indicator"></div>
+                            </div>
+                            <div class="mockup-user-info">
+                                <div id="previewDisplayName" class="mockup-name">Người dùng Discord</div>
+                                <div id="previewUsername" class="mockup-tag">@username</div>
+                                <div class="mockup-status-bubble">
+                                    <span id="previewEmoji" class="mockup-status-emoji">🎵</span>
+                                    <span id="previewStatusText" class="mockup-status-text">Đang chờ lời bài hát...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- KARAOKE LYRICS SCROLLER -->
+                    <div class="lyrics-card-wrapper">
+                        <div class="lyrics-header">
+                            <h3>Bảng Lời Bài Hát (Karaoke View)</h3>
+                            <span id="lyricsCount" class="badge-count">0 câu</span>
+                        </div>
+                        <div id="lyricsContainer" class="lyrics-scroller">
+                            <div class="empty-lyrics-state">
+                                <div class="empty-icon">📜</div>
+                                <p>Chưa có lời bài hát nào</p>
+                                <span>Hãy quét từ link hoặc tải file .lrc để bắt đầu xem lời và đồng bộ</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CARD: SYSTEM LOGS -->
+                <div class="card logs-card">
+                    <div class="card-header logs-header">
+                        <h3>Nhật Ký Hoạt Động (Live Terminal)</h3>
+                        <button id="clearLogsBtn" class="btn-xs">Xóa log</button>
+                    </div>
+                    <div id="logContainer" class="log-stream">
+                        <div class="log-entry info"><span class="log-time">00:00:00</span> Tool đã sẵn sàng. Hãy kết nối tài khoản Discord!</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL FOR SEARCH CANDIDATES -->
+    <div id="searchModal" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Chọn Bản Ghi Lời Bài Hát Phù Hợp</h3>
+                <button id="closeModalBtn" class="btn-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Tìm thấy nhiều bản ghi lời cho bài hát này. Hãy chọn bản ghi có nhịp chuẩn nhất:</p>
+                <div id="candidateList" class="candidate-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
