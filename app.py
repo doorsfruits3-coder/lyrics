@@ -96,8 +96,20 @@ def _clean_title(text):
     text = _NOISE_RE.sub("", text)
     return re.sub(r"\s+", " ", text).strip(" -–—|")
 
-def soundcloud_to_query(url):
-    """Đổi link SoundCloud thành chuỗi tìm kiếm 'tên bài + ca sĩ'. Trả về None nếu thất bại."""
+def _strip_feat(text):
+    text = re.sub(r"[\(\[]\s*(?:feat|ft)\.?[^\)\]]*[\)\]]", "", text, flags=re.I)
+    text = re.sub(r"\s+(?:feat|ft)\.?\s+.*$", "", text, flags=re.I)
+    return re.sub(r"\s+", " ", text).strip(" -–—|")
+
+def soundcloud_to_queries(url):
+    """Đổi link SoundCloud thành danh sách chuỗi tìm kiếm (ưu tiên từ trên xuống)."""
+    variants = []
+
+    def add(q):
+        q = (q or "").strip()
+        if q and q.lower() not in [v.lower() for v in variants]:
+            variants.append(q)
+
     # Cách 1: oEmbed chính thức của SoundCloud (không cần API key)
     try:
         api = "https://soundcloud.com/oembed?format=json&url=" + urllib.parse.quote(url, safe="")
@@ -110,21 +122,33 @@ def soundcloud_to_query(url):
             title = title[:-len(suffix)]
         title = _clean_title(title)
         if title:
-            # Nếu tiêu đề đã có dạng "Ca sĩ - Tên bài" thì giữ nguyên
-            return title if (" - " in title or not author) else f"{title} {author}"
+            if " - " in title:
+                artist_part, song_part = title.split(" - ", 1)
+                add(title)
+                add(_strip_feat(song_part))
+                add(f"{_strip_feat(song_part)} {artist_part}")
+            else:
+                clean = _strip_feat(title)
+                add(f"{clean} {author}" if author else clean)
+                add(clean)
+                add(title)
     except Exception:
         pass
 
     # Cách 2: lấy từ đường dẫn (soundcloud.com/<ca-si>/<ten-bai>), có xử lý link rút gọn on.soundcloud.com
-    try:
-        with _http_get(url) as r:
-            final_url = r.geturl()
-    except Exception:
-        final_url = url
-    parts = [p for p in urllib.parse.urlparse(final_url).path.split("/") if p]
-    if len(parts) >= 2 and parts[1].lower() not in ("sets", "albums", "likes", "tracks", "reposts"):
-        return f"{parts[1].replace('-', ' ')} {parts[0].replace('-', ' ')}"
-    return None
+    if not variants:
+        try:
+            with _http_get(url) as r:
+                final_url = r.geturl()
+        except Exception:
+            final_url = url
+        parts = [p for p in urllib.parse.urlparse(final_url).path.split("/") if p]
+        if len(parts) >= 2 and parts[1].lower() not in ("sets", "albums", "likes", "tracks", "reposts"):
+            song = parts[1].replace("-", " ")
+            artist = parts[0].replace("-", " ")
+            add(f"{song} {artist}")
+            add(song)
+    return variants
 
 # --- LYRICS ENDPOINTS ---
 @app.route("/api/lyrics/fetch-url", methods=["POST"])
@@ -134,16 +158,20 @@ def fetch_url():
     if not url_or_query:
         return jsonify({"success": False, "error": "Vui lòng nhập link bài hát hoặc tên bài hát!"}), 400
 
-    query = url_or_query
+    queries = [url_or_query]
     if is_soundcloud_url(url_or_query):
         if "/sets/" in url_or_query.lower():
             return jsonify({"success": False, "error": "Đây là link playlist/album SoundCloud. Hãy dán link của một bài hát cụ thể!"}), 400
-        query = soundcloud_to_query(url_or_query)
-        if not query:
+        queries = soundcloud_to_queries(url_or_query)
+        if not queries:
             return jsonify({"success": False, "error": "Không đọc được thông tin từ link SoundCloud này. Hãy thử nhập tên bài hát!"}), 400
-        sync_controller.add_log(f"Đã nhận diện link SoundCloud, đang tìm lời cho: {query}")
+        sync_controller.add_log(f"Đã nhận diện link SoundCloud, đang tìm lời cho: {queries[0]}")
 
-    success, result = LyricsEngine.get_lyrics_from_link_or_query(query)
+    success, result = False, {}
+    for q in queries:
+        success, result = LyricsEngine.get_lyrics_from_link_or_query(q)
+        if success:
+            break
     if not success:
         return jsonify({"success": False, "error": result.get("message", "Không tìm thấy lời bài hát.")}), 404
 
@@ -169,7 +197,12 @@ def search_lyrics():
     query = request.args.get("q", "").strip()
     if not query:
         return jsonify({"success": False, "results": []})
-    success, results = LyricsEngine.search_synced_lyrics(query)
+    queries = soundcloud_to_queries(query) if is_soundcloud_url(query) else [query]
+    success, results = False, []
+    for q in queries:
+        success, results = LyricsEngine.search_synced_lyrics(q)
+        if success and results:
+            break
     return jsonify({"success": success, "results": results})
 
 @app.route("/api/lyrics/select-candidate", methods=["POST"])
