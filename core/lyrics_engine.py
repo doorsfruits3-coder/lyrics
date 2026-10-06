@@ -154,7 +154,7 @@ class LyricsEngine:
     @classmethod
     def extract_info_from_url(cls, url: str):
         """
-        Extracts song title and possible artist from YouTube, Spotify, ZingMP3, etc.
+        Extracts song title and possible artist from YouTube, Spotify, SoundCloud, ZingMP3, etc.
         """
         url = url.strip()
         # 1. YouTube URL
@@ -169,6 +169,7 @@ class LyricsEngine:
                     return {
                         "type": "youtube",
                         "raw_title": raw_title,
+                        "clean_title": clean_title,
                         "query": clean_title or raw_title,
                         "artist": author
                     }
@@ -182,34 +183,189 @@ class LyricsEngine:
                 resp = requests.get(oembed_url, timeout=6)
                 if resp.status_code == 200:
                     raw_title = resp.json().get("title", "")
+                    clean_title = cls.clean_song_title(raw_title)
                     return {
                         "type": "spotify",
                         "raw_title": raw_title,
+                        "clean_title": clean_title,
                         "query": raw_title,
                         "artist": ""
                     }
             except Exception:
                 pass
 
-        # 3. ZingMP3 URL (e.g. zingmp3.vn/bai-hat/Ten-Bai-Hat-Ca-Si/ID.html)
+        # 3. SoundCloud URL
+        if "soundcloud.com" in url:
+            clean_url = url
+            if not clean_url.startswith("http://") and not clean_url.startswith("https://"):
+                clean_url = "https://" + clean_url
+
+            # If it's a short link like on.soundcloud.com/xxx, resolve redirect
+            if "on.soundcloud.com" in clean_url:
+                try:
+                    resolve_resp = requests.get(
+                        clean_url,
+                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
+                        allow_redirects=True,
+                        timeout=5,
+                        stream=True
+                    )
+                    if resolve_resp.url and "soundcloud.com" in resolve_resp.url:
+                        clean_url = resolve_resp.url
+                except Exception:
+                    pass
+
+            # Normalize m.soundcloud.com to soundcloud.com for oEmbed
+            oembed_target = re.sub(r'^(https?://)m\.soundcloud\.com', r'\1soundcloud.com', clean_url)
+
+            # Try SoundCloud oEmbed first
+            try:
+                oembed_url = f"https://soundcloud.com/oembed?url={urllib.parse.quote(oembed_target)}&format=json"
+                resp = requests.get(
+                    oembed_url,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
+                    timeout=6
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    raw_title = data.get("title", "")
+                    author = data.get("author_name", "")
+
+                    # Strip "by {author}" at the end of the title if present
+                    track_title = raw_title
+                    if author:
+                        track_title = re.sub(r'\s+by\s+' + re.escape(author) + r'$', '', track_title, flags=re.IGNORECASE)
+
+                    clean_title = cls.clean_song_title(track_title)
+                    query = f"{clean_title} {author}".strip() if author and author.lower() not in clean_title.lower() else clean_title
+                    return {
+                        "type": "soundcloud",
+                        "raw_title": raw_title,
+                        "clean_title": clean_title or raw_title,
+                        "query": query or clean_title or raw_title,
+                        "artist": author
+                    }
+            except Exception:
+                pass
+
+            # Fallback: Parse URL path / slug
+            try:
+                parsed = urllib.parse.urlparse(oembed_target)
+                path = parsed.path.strip("/")
+                segments = [s for s in path.split("/") if s]
+                if len(segments) >= 2 and segments[0].lower() not in ("discover", "stream", "upload", "you", "settings", "search"):
+                    raw_artist_slug = segments[0].replace("-", " ").replace("_", " ").strip()
+                    # If artist slug is an auto-generated user id like user-12345678, ignore it
+                    if re.match(r'^user[-_\s\d]+$', raw_artist_slug, re.IGNORECASE):
+                        artist_slug = ""
+                    else:
+                        cleaned_artist = re.sub(
+                            r'(?:official|music|records|audio|channel|prod|production|media)$',
+                            '',
+                            raw_artist_slug,
+                            flags=re.IGNORECASE
+                        ).strip()
+                        artist_slug = cleaned_artist if cleaned_artist else raw_artist_slug
+
+                    track_slug = segments[-1].replace("-", " ").replace("_", " ")
+                    clean_track = cls.clean_song_title(track_slug)
+                    query = f"{clean_track} {artist_slug}".strip() if (artist_slug and artist_slug.lower() not in clean_track.lower()) else clean_track
+                    return {
+                        "type": "soundcloud",
+                        "raw_title": track_slug,
+                        "clean_title": clean_track or track_slug,
+                        "query": query or clean_track or track_slug,
+                        "artist": artist_slug
+                    }
+                elif segments:
+                    track_slug = segments[-1].replace("-", " ").replace("_", " ")
+                    clean_track = cls.clean_song_title(track_slug)
+                    return {
+                        "type": "soundcloud",
+                        "raw_title": track_slug,
+                        "clean_title": clean_track or track_slug,
+                        "query": clean_track or track_slug,
+                        "artist": ""
+                    }
+            except Exception:
+                pass
+
+        # 4. ZingMP3 URL (e.g. zingmp3.vn/bai-hat/Ten-Bai-Hat-Ca-Si/ID.html)
         if "zingmp3.vn" in url:
             slug_match = re.search(r'/bai-hat/([^/]+)/', url)
             if slug_match:
                 slug = slug_match.group(1).replace('-', ' ')
+                clean_slug = cls.clean_song_title(slug)
                 return {
                     "type": "zingmp3",
                     "raw_title": slug,
-                    "query": slug,
+                    "clean_title": clean_slug,
+                    "query": clean_slug or slug,
                     "artist": ""
                 }
 
-        # 4. Fallback: treat whole input as query / song name
+        # 5. Fallback: treat whole input as query / song name
+        clean_input = cls.clean_song_title(url)
         return {
             "type": "generic",
             "raw_title": url,
-            "query": cls.clean_song_title(url),
+            "clean_title": clean_input,
+            "query": clean_input or url,
             "artist": ""
         }
+
+    @classmethod
+    def rank_candidates(cls, results: list, clean_title: str = "", artist: str = "", query: str = ""):
+        """
+        Ranks search candidates based on:
+        1. Having synced lyrics (+50)
+        2. Exact track name match (+40)
+        3. Title substring match (+20)
+        4. Artist match (+30)
+        5. Keyword overlap (+5 per keyword)
+        """
+        if not results:
+            return results
+
+        clean_t = (clean_title or "").lower().strip()
+        art = (artist or "").lower().strip()
+        art_tokens = set(re.findall(r'\w+', art))
+        q_words = set(re.findall(r'\w+', (query or "").lower()))
+
+        def score(item):
+            s = 0
+            if item.get("has_synced"):
+                s += 50
+
+            track_name = (item.get("track_name") or "").lower().strip()
+            artist_name = (item.get("artist_name") or "").lower().strip()
+
+            if clean_t:
+                if track_name == clean_t:
+                    s += 40
+                elif clean_t in track_name:
+                    s += 20
+
+            if art:
+                art_compact = art.replace(" ", "").replace("-", "")
+                artist_name_compact = artist_name.replace(" ", "").replace("-", "")
+                if art in artist_name or artist_name in art:
+                    s += 35
+                elif art_compact and len(art_compact) >= 3 and (art_compact in artist_name_compact or artist_name_compact in art_compact):
+                    s += 30
+                else:
+                    item_art_tokens = set(re.findall(r'\w+', artist_name))
+                    if art_tokens & item_art_tokens:
+                        s += 20
+
+            item_text = f"{track_name} {artist_name}"
+            for w in q_words:
+                if len(w) > 2 and w in item_text:
+                    s += 5
+
+            return s
+
+        return sorted(results, key=score, reverse=True)
 
     @classmethod
     def search_synced_lyrics(cls, query: str):
@@ -265,8 +421,20 @@ class LyricsEngine:
 
         success, results = cls.search_synced_lyrics(query)
         if not success or not results:
+            # Try searching with clean_title if different from query
+            if info.get("clean_title") and info.get("clean_title") != query:
+                success, results = cls.search_synced_lyrics(info["clean_title"])
+
+        if not success or not results:
+            # Try searching with artist + clean_title if available
+            if info.get("artist") and info.get("clean_title"):
+                comb_query = f"{info['artist']} {info['clean_title']}"
+                if comb_query != query:
+                    success, results = cls.search_synced_lyrics(comb_query)
+
+        if not success or not results:
             # Try searching with raw title if cleaned title didn't yield results
-            if info["raw_title"] != query:
+            if info.get("raw_title") and info["raw_title"] != query:
                 success, results = cls.search_synced_lyrics(info["raw_title"])
 
         if not success or not results:
@@ -277,13 +445,22 @@ class LyricsEngine:
                 "candidates": []
             }
 
+        # Rank candidates by relevance
+        results = cls.rank_candidates(
+            results,
+            clean_title=info.get("clean_title", ""),
+            artist=info.get("artist", ""),
+            query=query
+        )
+
         # Check if first item has synced lyrics
         top_item = results[0]
+        artist_name = top_item.get("artist_name") or info.get("artist") or "Không rõ"
         if top_item["has_synced"]:
             parsed_lyrics = cls.parse_lrc(top_item["synced_lyrics"])
             return True, {
                 "track_name": top_item["track_name"],
-                "artist_name": top_item["artist_name"],
+                "artist_name": artist_name,
                 "duration": top_item["duration"],
                 "lyrics": parsed_lyrics,
                 "candidates": results[:5]
@@ -293,7 +470,7 @@ class LyricsEngine:
             parsed_lyrics = cls.parse_plain_text(top_item["plain_lyrics"])
             return True, {
                 "track_name": top_item["track_name"],
-                "artist_name": top_item["artist_name"],
+                "artist_name": artist_name,
                 "duration": top_item["duration"],
                 "lyrics": parsed_lyrics,
                 "is_plain_fallback": True,

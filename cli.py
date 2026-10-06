@@ -43,7 +43,7 @@ def main():
 
     # 2. CHOOSE SOURCE
     print(f"{Fore.CYAN}[2] CHỌN NGUỒN LỜI BÀI HÁT{Style.RESET_ALL}")
-    print("1. Nhập link YouTube, Spotify, ZingMP3 hoặc tên bài hát")
+    print("1. Nhập link YouTube, Spotify, SoundCloud, ZingMP3 hoặc tên bài hát")
     print("2. Nhập đường dẫn tệp lời bài hát (.lrc, .srt, .txt)")
     print("3. Dùng bài hát mẫu (1: See Tình, 2: Nơi Này Có Anh)")
 
