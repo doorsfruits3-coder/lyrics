@@ -2,6 +2,10 @@ import os
 import sys
 import webbrowser
 import threading
+import re
+import json
+import urllib.parse
+import urllib.request
 
 # Fix Windows console encoding
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ('utf-8', 'utf8'):
@@ -73,6 +77,55 @@ def clear_status():
     return jsonify({"success": succ, "message": msg})
 
 
+
+# --- SOUNDCLOUD SUPPORT ---
+SOUNDCLOUD_RE = re.compile(r"^https?://(?:www\.|m\.|on\.)?soundcloud\.com/\S+", re.I)
+_NOISE_RE = re.compile(
+    r"[\(\[][^\)\]]*(?:official|lyric|audio|video|mv|visualizer|free download|prod)[^\)\]]*[\)\]]",
+    re.I,
+)
+
+def is_soundcloud_url(text):
+    return bool(SOUNDCLOUD_RE.match(text.strip()))
+
+def _http_get(url, timeout=8):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    return urllib.request.urlopen(req, timeout=timeout)
+
+def _clean_title(text):
+    text = _NOISE_RE.sub("", text)
+    return re.sub(r"\s+", " ", text).strip(" -–—|")
+
+def soundcloud_to_query(url):
+    """Đổi link SoundCloud thành chuỗi tìm kiếm 'tên bài + ca sĩ'. Trả về None nếu thất bại."""
+    # Cách 1: oEmbed chính thức của SoundCloud (không cần API key)
+    try:
+        api = "https://soundcloud.com/oembed?format=json&url=" + urllib.parse.quote(url, safe="")
+        with _http_get(api) as r:
+            info = json.loads(r.read().decode("utf-8", errors="ignore"))
+        author = (info.get("author_name") or "").strip()
+        title = (info.get("title") or "").strip()
+        suffix = f" by {author}"
+        if author and title.lower().endswith(suffix.lower()):
+            title = title[:-len(suffix)]
+        title = _clean_title(title)
+        if title:
+            # Nếu tiêu đề đã có dạng "Ca sĩ - Tên bài" thì giữ nguyên
+            return title if (" - " in title or not author) else f"{title} {author}"
+    except Exception:
+        pass
+
+    # Cách 2: lấy từ đường dẫn (soundcloud.com/<ca-si>/<ten-bai>), có xử lý link rút gọn on.soundcloud.com
+    try:
+        with _http_get(url) as r:
+            final_url = r.geturl()
+    except Exception:
+        final_url = url
+    parts = [p for p in urllib.parse.urlparse(final_url).path.split("/") if p]
+    if len(parts) >= 2 and parts[1].lower() not in ("sets", "albums", "likes", "tracks", "reposts"):
+        return f"{parts[1].replace('-', ' ')} {parts[0].replace('-', ' ')}"
+    return None
+
 # --- LYRICS ENDPOINTS ---
 @app.route("/api/lyrics/fetch-url", methods=["POST"])
 def fetch_url():
@@ -81,7 +134,16 @@ def fetch_url():
     if not url_or_query:
         return jsonify({"success": False, "error": "Vui lòng nhập link bài hát hoặc tên bài hát!"}), 400
 
-    success, result = LyricsEngine.get_lyrics_from_link_or_query(url_or_query)
+    query = url_or_query
+    if is_soundcloud_url(url_or_query):
+        if "/sets/" in url_or_query.lower():
+            return jsonify({"success": False, "error": "Đây là link playlist/album SoundCloud. Hãy dán link của một bài hát cụ thể!"}), 400
+        query = soundcloud_to_query(url_or_query)
+        if not query:
+            return jsonify({"success": False, "error": "Không đọc được thông tin từ link SoundCloud này. Hãy thử nhập tên bài hát!"}), 400
+        sync_controller.add_log(f"Đã nhận diện link SoundCloud, đang tìm lời cho: {query}")
+
+    success, result = LyricsEngine.get_lyrics_from_link_or_query(query)
     if not success:
         return jsonify({"success": False, "error": result.get("message", "Không tìm thấy lời bài hát.")}), 404
 
